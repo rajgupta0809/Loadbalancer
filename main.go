@@ -63,10 +63,10 @@ func (lb *LoadBalancer) getNextAvailableServer() Server {
 		return nil
 	}
 
-	start := lb.counter.Add(1)
+	start := lb.counter.Add(1) - 1
 
 	for i := 0; i < totalServers; i++ {
-		index := int64(start+int64(i)) & int64(totalServers)
+		index := int64(start+int64(i)) % int64(totalServers)
 		server := lb.servers[index]
 		if server.IsAlive() {
 			return server
