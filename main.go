@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync/atomic"
 )
 
 type Server interface {
@@ -44,24 +45,29 @@ func (s *simpleServer) Serve(rw http.ResponseWriter, req *http.Request) {
 }
 
 type LoadBalancer struct {
-	port            string
-	servers         []Server
-	roundRobinCount int
+	port    string
+	servers []Server
+	counter atomic.Int64
 }
 
 func NewLoadBalancer(port string, servers []Server) *LoadBalancer {
 	return &LoadBalancer{
-		port:            port,
-		servers:         servers,
-		roundRobinCount: 0,
+		port:    port,
+		servers: servers,
 	}
 }
 
 func (lb *LoadBalancer) getNextAvailableServer() Server {
 	totalServers := len(lb.servers)
+	if totalServers == 0 {
+		return nil
+	}
+
+	start := lb.counter.Add(1) - 1
+
 	for i := 0; i < totalServers; i++ {
-		server := lb.servers[lb.roundRobinCount%totalServers]
-		lb.roundRobinCount++
+		index := int64(start+int64(i)) % int64(totalServers)
+		server := lb.servers[index]
 		if server.IsAlive() {
 			return server
 		}
