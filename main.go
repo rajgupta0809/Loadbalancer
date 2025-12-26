@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Server interface {
@@ -17,6 +19,8 @@ type Server interface {
 type simpleServer struct {
 	addr  string
 	proxy *httputil.ReverseProxy
+	alive bool
+	mu    sync.RWMutex //why RWMutex?
 }
 
 func NewServer(addr string) *simpleServer {
@@ -28,6 +32,7 @@ func NewServer(addr string) *simpleServer {
 	return &simpleServer{
 		addr:  addr,
 		proxy: httputil.NewSingleHostReverseProxy(serverUrl),
+		alive: true,
 	}
 }
 
@@ -36,8 +41,31 @@ func (s *simpleServer) Address() string {
 }
 
 func (s *simpleServer) IsAlive() bool {
-	// In a real-world scenario, implement health check logic here
-	return true
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.alive
+}
+
+func (s *simpleServer) CheckHealth() {
+	timeout := 2 * time.Second
+
+	client := http.Client{
+		Timeout: timeout,
+	}
+
+	resp, err := client.Get(s.addr + "/health")
+	if err != nil {
+		s.alive = false
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		s.alive = false
+		return
+	}
+
+	s.alive = true
 }
 
 func (s *simpleServer) Serve(rw http.ResponseWriter, req *http.Request) {
@@ -54,6 +82,16 @@ func NewLoadBalancer(port string, servers []Server) *LoadBalancer {
 	return &LoadBalancer{
 		port:    port,
 		servers: servers,
+	}
+}
+
+func (lb *LoadBalancer) healthCheck(interval time.Duration) { //explain
+	ticker := time.NewTicker(interval)
+
+	for range ticker.C {
+		for _, server := range lb.servers {
+			go server.(*simpleServer).CheckHealth()
+		}
 	}
 }
 
@@ -86,13 +124,16 @@ func (lb *LoadBalancer) ServeProxy(rw http.ResponseWriter, req *http.Request) {
 }
 
 func main() {
+
 	servers := []Server{
 		NewServer("https://google.com"),
 		NewServer("https://facebook.com"),
-		NewServer("https://twitter.com"),
+		NewServer("http://localhost:8000"),
 	}
 
 	loadBalancer := NewLoadBalancer("8080", servers)
+	go loadBalancer.healthCheck(10 * time.Second)
+
 	handleRedirect := func(w http.ResponseWriter, req *http.Request) {
 		loadBalancer.ServeProxy(w, req)
 	}
