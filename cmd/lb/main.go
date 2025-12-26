@@ -12,9 +12,8 @@ import (
 func main() {
 
 	servers := []server.Server{
-		server.NewServer("https://google.com"),
-		server.NewServer("https://facebook.com"),
 		server.NewServer("http://localhost:8000"),
+		server.NewServer("http://localhost:8001"),
 	}
 
 	lb := balancer.NewLoadBalancer("8080", servers)

@@ -1,7 +1,9 @@
 package balancer
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -13,6 +15,14 @@ type LoadBalancer struct {
 	port    string
 	servers []server.Server
 	counter atomic.Int64
+}
+
+func cloneRequest(r *http.Request, body []byte) *http.Request {
+	req := r.Clone(r.Context())
+	if body != nil {
+		req.Body = io.NopCloser(bytes.NewBuffer(body))
+	}
+	return req
 }
 
 func NewLoadBalancer(port string, servers []server.Server) *LoadBalancer {
@@ -55,11 +65,23 @@ func (lb *LoadBalancer) getNextAvailableServer() server.Server {
 func (lb *LoadBalancer) ServeProxy(w http.ResponseWriter, r *http.Request) {
 	const maxRetries = 3
 
+	var body []byte
+	var err error
+
+	if r.Body != nil {
+		body, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "failed to read request body", http.StatusBadRequest)
+			return
+		}
+	}
+
 	for i := 0; i < maxRetries; i++ {
 		srv := lb.getNextAvailableServer()
 		if srv != nil {
+			req := cloneRequest(r, body)
 			fmt.Println("Forwarding request to:", srv.Address())
-			srv.Serve(w, r)
+			srv.Serve(w, req)
 			return
 		}
 	}
