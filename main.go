@@ -29,11 +29,30 @@ func NewServer(addr string) *simpleServer {
 		panic(err)
 	}
 
-	return &simpleServer{
+	proxy := httputil.NewSingleHostReverseProxy(serverUrl)
+
+	s := &simpleServer{
 		addr:  addr,
-		proxy: httputil.NewSingleHostReverseProxy(serverUrl),
+		proxy: proxy,
 		alive: true,
 	}
+	//if server doesn't respond in 2 seconds, consider it dead
+	//so we are adding this beacause it might be possible that server is slow and we don't want to wait indefinitely
+	proxy.Transport = &http.Transport{
+		ResponseHeaderTimeout: 2 * time.Second,
+	}
+
+	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
+		s.mu.Lock()
+		s.alive = false
+		s.mu.Unlock()
+
+		fmt.Printf("error while proxying to %s: %v\n", addr, err)
+	}
+
+	s.proxy = proxy
+
+	return s
 }
 
 func (s *simpleServer) Address() string {
@@ -114,13 +133,17 @@ func (lb *LoadBalancer) getNextAvailableServer() Server {
 }
 
 func (lb *LoadBalancer) ServeProxy(rw http.ResponseWriter, req *http.Request) {
-	targetServer := lb.getNextAvailableServer()
-	if targetServer != nil {
-		fmt.Println("Forwarding request to:", targetServer.Address())
-		targetServer.Serve(rw, req)
-	} else {
-		http.Error(rw, "Service not available", http.StatusServiceUnavailable)
+	const maxRetries = 3
+	for i := 0; i < maxRetries; i++ {
+		targetServer := lb.getNextAvailableServer()
+		if targetServer != nil {
+			fmt.Println("Forwarding request to:", targetServer.Address())
+			targetServer.Serve(rw, req)
+			return
+		}
 	}
+
+	http.Error(rw, "Service not available", http.StatusServiceUnavailable)
 }
 
 func main() {
