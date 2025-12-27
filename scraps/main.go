@@ -13,7 +13,7 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello from backend on port %s\n", port)
+		fmt.Println(w, "Hello from backend on port ", port)
 		fmt.Println("request", r.Body)
 	})
 
