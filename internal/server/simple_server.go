@@ -10,10 +10,11 @@ import (
 )
 
 type SimpleServer struct {
-	addr  string
-	proxy *httputil.ReverseProxy
-	alive bool
-	mu    sync.RWMutex //why RWMutex?
+	addr      string
+	proxy     *httputil.ReverseProxy
+	alive     bool
+	mu        sync.RWMutex
+	failCount int
 }
 
 func NewServer(addr string) *SimpleServer {
@@ -37,7 +38,10 @@ func NewServer(addr string) *SimpleServer {
 
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
 		s.mu.Lock()
-		s.alive = false
+		s.failCount++
+		if s.failCount >= 3 {
+			s.alive = false
+		}
 		s.mu.Unlock()
 
 		fmt.Printf("error while proxying to %s: %v\n", addr, err)
@@ -77,7 +81,11 @@ func (s *SimpleServer) CheckHealth() {
 		return
 	}
 
+	s.mu.Lock()
+	s.failCount = 0
 	s.alive = true
+	s.mu.Unlock()
+
 }
 
 func (s *SimpleServer) Serve(rw http.ResponseWriter, req *http.Request) {
