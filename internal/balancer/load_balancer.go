@@ -2,6 +2,7 @@ package balancer
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -79,14 +80,17 @@ func (lb *LoadBalancer) ServeProxy(w http.ResponseWriter, r *http.Request) {
 	for i := 0; i < maxRetries; i++ {
 		srv := lb.getNextAvailableServer()
 		if srv != nil {
-			req := cloneRequest(r, body)
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+
+			req := cloneRequest(r.WithContext(ctx), body)
 			fmt.Println("Forwarding request to:", srv.Address())
 			srv.Serve(w, req)
 			return
 		}
 	}
 
-	http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
+	http.Error(w, "All backends unavailable", http.StatusServiceUnavailable)
 }
 
 func (lb *LoadBalancer) Port() string {
